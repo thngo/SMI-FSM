@@ -1,3 +1,5 @@
+# SMI-FSM
+
 Single Molecule Imaging – Fluorescent Speckle Microscopy (SMI-FSM) analysis
 
 SMI-FSM is a software (written in MATLAB) for the analysis of simultaneous two-color imaging data of plasma membrane proteins (via SMI) and cortical actin (via FSM). In brief, it is designed to:
