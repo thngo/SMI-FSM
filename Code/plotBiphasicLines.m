@@ -50,7 +50,7 @@ function plotBiphasicLines(TRI, motionType, propVect, threshTab, cellNo, figStr,
 %
 % Tra Ngo, Oct 2021
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 

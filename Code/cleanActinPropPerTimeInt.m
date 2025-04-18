@@ -1,7 +1,7 @@
 function [actinPropPerTimeIntClnSpeed,actinPropPerTimeIntClnLft,...
     actinPropPerTimeIntClnSpeedLft] = cleanActinPropPerTimeInt(...
     actinPropPerTimeInt,speedThresh)
-%CLEANACTINPROPPERTIMEINT replaces small speckle speeds and incomplete speckle lifetimes with 0 and NaN
+%CLEANACTINPROPPERTIMEINT replaces small speckle speeds and incomplete speckle lifetimes with 0 and NaN, respectively
 %
 %SYNOPSIS [actinPropPerTimeIntClnSpeed,actinPropPerTimeIntClnLft,...
 %     actinPropPerTimeIntClnSpeedLft] = cleanActinPropPerTimeInt(...
@@ -25,7 +25,7 @@ function [actinPropPerTimeIntClnSpeed,actinPropPerTimeIntClnLft,...
 %
 %Khuloud Jaqaman, July 2021
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 

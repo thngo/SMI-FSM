@@ -45,7 +45,7 @@ function [tassmInl, flagInl, tassmInlFollower1Out, tassmInlFollower2Out] = ...
 %
 % Tra Ngo, July 2021
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 
@@ -151,10 +151,21 @@ for iC = 1:numCell
                     continue
                 end
                 
-                data = tassmMaster{iC,1}{1,iP}(:,iCurr);
+                data_withNan = tassmMaster{iC,1}{1,iP}(:,iCurr);
+                
+                % remove nan from data
+                indxNan = isnan(data_withNan);
+                data = data_withNan(~indxNan);
                 
                 % detect outlier
-                outlierIdx = isoutlier(data,'quartiles','ThresholdFactor',threshCurr);
+                outlierIdx_noNan = isoutlier(data,'quartiles','ThresholdFactor',threshCurr);
+                
+                % Map the outlier indices back to the original vector
+                originalOutlierIdx = find(~indxNan); % indices of non-NaN elements
+                originalOutlierIdx = originalOutlierIdx(outlierIdx_noNan); % get indices of outliers in original vector
+                
+                outlierIdx = false(length(data_withNan),1);
+                outlierIdx(originalOutlierIdx) = true;
                 
                 % Output inlier flags: %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
                 flagInl{iC}{1,iP}(outlierIdx,iCurr) = false;

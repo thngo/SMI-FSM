@@ -33,7 +33,7 @@ function [tassmOut, indxConverted] = smactinClean(tassmIn, varName, colIndxArr, 
 %
 % Tra Ngo, Jun 2021
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 

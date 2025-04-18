@@ -1,9 +1,9 @@
-function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll] = ...
+function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll, intensityModelInfoPerMov] = ...
     smPropPerTimeInterval(utrackPackPaths, smConditions,qfsmPackPaths, ...
     diffModeDividerStruct, smSpanRadius, intensityInfoBackUp)
 %SMPROPPERTIMEINTERVAL reads data from u-track analysis folders and calculates spatiotemporal properties of single-molecule data
 %
-%SYNOPSIS: [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll] = smPropPerTimeInterval(utrackPackPaths, smConditions, qfsmPackPaths, diffModeDividerStruct, smSpanRadius, intensityInfoBackUp)
+%SYNOPSIS: [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll, intensityModelInfoPerMov] = smPropPerTimeInterval(utrackPackPaths, smConditions, qfsmPackPaths, diffModeDividerStruct, smSpanRadius, intensityInfoBackUp)
 %
 %INPUT:  utrackPackPaths: (n x 1 cell) paths leading to n U-Track analysis
 %                         results in "TrackingPackage" folders.
@@ -12,10 +12,10 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 %                         contains the following fields.
 %
 %                       .minLft: (n x 1 vector of integer) minimum acceptable
-%                                lifetime for single-molecules for motion 
-%                                analysis. Any SM with lifetime lower than 
+%                                lifetime for single-molecules for motion
+%                                analysis. Any SM with lifetime lower than
 %                                the minLft will be eliminated from processing.
-%                                Recommended value: 10 
+%                                Recommended value: 10
 %
 %                       .rad_density: (n x 1 vector of double) radius used
 %                                for calculating local SM density.
@@ -33,12 +33,14 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 %
 %                       .maskLoc: (n x 1 vector of integer) flag indicating
 %                                location of cell ROI mask.
-%                          = 0 : there do not exist any masks
-%                          = 1 : there exists a folder with external
+%                                See getActinMask.m for details.
+%                          = 0 : there exists 1 mask in local SMI folder
+%                                called "ImportedCellMask".
+%                          = 1 : (MANUAL) there exists a folder with external
 %                                masks within path provided in
 %                                qfsmPackPaths (make sure folder name
 %                                follows a name in extlroi variable.)
-%                          = 2 : there exists a folder with refined
+%                          = 2 : (AUTOMATED) there exists a folder with refined
 %                                masks within the QFSMPackage folder
 %                                provided in qfsmPackPaths
 %                          = 3 : there exists a folder with refined
@@ -46,7 +48,24 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 %                                folder provided in qfsmPackPaths
 %                          if .maskLoc = [], the code will crash.
 %
-%          qfsmPackPaths: (n x 1 cell) paths leading to QFSM Package results
+%                       .randFlag: flag to indicate randomization of SM tracks
+%                                  (i.e., moving SM tracks from its
+%                                  original location to somewhere else on
+%                                  the eroded mask)
+%                           = 1: randomize track position to any location
+%                                in mask ROI
+%
+%                       .clean : (n x 1 vector of logical) flag indicating
+%                                whether SM tracks from u-track has been
+%                                cleaned (artifacts removed).
+%                         = true. Default: Function will look for
+%                                cleaned_Channel_1_tracking_result.mat 
+%                                Error will be output if such file is not found
+%                         = false. Function will look for
+%                                Channel_1_tracking_result.mat
+%
+%          qfsmPackPaths: (n x 1 cell) paths leading to QFSM Package
+%                          results. This is for loading masks.
 %
 %           smSpanRadius: (integer) radius of domain that a single sm can
 %                         span before being chopped into (multiple)
@@ -65,21 +84,23 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 %                        of mode divider values.
 %                       Optional. Input not implemeted. Default = [].
 %
-%           intensityInfoBackUp: (optional, row vector of 2 values) data of
-%                         monomer intensity as [dataMean dataStdev], used to
-%                         estimate oligomeric state if automatic estimation
-%                         at each movie error out. This option should only
-%                         only be used to test movie with only 1 track,
-%                         which did not contain enough info for estimating
-%                         monomer intensities. -- TN 20210408
+%           intensityInfoBackUp: (optional) data of monomer intensity as
+%                         [dataMean dataStdev], used to estimate oligomeric
+%                         state if automatic estimation at each movie error
+%                         out. This option should only only be used to test
+%                         movie with only 1 track, which did not contain
+%                         enough info for estimating monomer intensities. 
+%                       Either: row vector of 2 values
+%                       Or    : cell array for n movies, each cell is the
+%                               param for each movie
 %
 %OUTPUT:   smPropPerTimeInt: (n x 1 cell array of structures) SMI arm
 %                            analysis results of SMI-FSM analysis for n
 %                            movies; contains various properties of SM;
-%                            each structure contains the following fields: 
+%                            each structure contains the following fields:
 %
 %                   .smFrames        : List of SM frames associated with each FSM frame.
-%                                  
+%
 %                   .smList          : List of SM tracks that exist in each FSM interval.
 %
 %                   .meanPos         : Mean position (x/y-coordinates) per SM track each FSM interval.
@@ -100,21 +121,21 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 %                   .netSpeed        : the net speed for a particular SM track during an FSM interval.
 %
 %                   .netVelAngle     : the net velocity angle within an FSM interval.
-%                                  For a SM track, this is the angle between .netSpeed 
+%                                  For a SM track, this is the angle between .netSpeed
 %                                  direction and a horizontal axis crossing the initial
 %                                  position of the SM track.
 %
-%                   .trackClass      : classification of all tracks based on moment 
+%                   .trackClass      : classification of all tracks based on moment
 %                                  scaling spectrum analysis.
 %                                   = 0 : immobile
 %                                   = 1 : confined brownian
 %                                   = 2 : pure brownian (free diffusion)
 %                                   = 3 : directed motion
 %
-%                   .diffCoef        : diffusion coefficient of each SM track in an FSM interval; 
+%                   .diffCoef        : diffusion coefficient of each SM track in an FSM interval;
 %                                  row corresponding to SM index.
 %
-%                   .confRad         : confinement radius of immobile & confined SM track; 
+%                   .confRad         : max pairwise distance of localizations
 %                                  row corresponds to SM index.
 %
 %                   .diffMode        : SM diffusion mode type as analysed by diffusionModeAnalysis
@@ -123,15 +144,44 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 %
 %                   .diffRad         : SM diffusion radius from diffusionModeAnalysis (not implemented TN20210310)
 %
+%                   .mssSlope        : SM mssSlope from trackDiffusionAnalysis1 (added TN Dec 2022/Jan 2023)
 %
-%                   threshMet  : (n x 1 cell vectors) contains SM indices that survive 
-%                             a minimum lifetime (observations) and exist within 
+%                   .meanSmDensity   : mean local SM density per FSM interval
+%
+%                   .smFramesExist   : frames at which this SM's localization exist.
+%
+%                   .f2fAmp          : frame-to-frame amplitude.
+%
+%                   .mergeInfoSpace  : xy-location of merge events.
+%
+%                   .splitInfoSpace  : xy-location of split events.
+%
+%                   .mDiffMode       : (calculated by mode analysis) Diffusion mode
+%
+%                   .mDiffCoef       : (calculated by mode analysis)
+%                                       Diffusion coefficient from mean
+%                                       square F2F displacement  
+%
+%                   .mMsdF2F         : (calculated by mode analysis) Mean
+%                                       square F2F displacement. 
+%
+%                   .mMeanPosStd     : (calculated by mode analysis) Mean
+%                                       positonal standard deviation. 
+% 
+%                   .mDiffRadius     : (calculated by mode analysis)
+%                                       Diffusion radius. 
+%                                      (confinement radius of immobile & confined SM track)
+%
+%                   .mLifetime       : (calculated by mode analysis) Track
+%                                       lifetime. Identical to .lifetime
+%
+%               threshMet  : (n x 1 cell vectors) contains SM indices that exists within
 %                             cell ROI masks from qFSM.
 %
-%               summaryNumTrackAll: (table of n*m rows) summary of the number of 
-%                                   tracklets added by each SM track processing 
+%               summaryNumTrackAll: (table of n*m rows) summary of the number of
+%                                   tracklets added by each SM track processing
 %                                   steps for m FSM intervals of n movies;
-%                                   contains the following columns: 
+%                                   contains the following columns:
 %                                           iMov
 %                                           iFrame (indicates the FSM interval)
 %                                           numTrack
@@ -147,11 +197,15 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 %
 %            numPassDecomptrackAll: (table of n*m rows) summary of number
 %                                   of tracks from u-track that is split by
-%                                   each FSM interval; contains the 
-%                                   following columns (added 20220714)
+%                                   each FSM interval; contains the
+%                                   following columns
 %                                           iMov
 %                                           sizeMinDecompTrack
 %                                           numPassTrack
+%
+%           intensityModelInfoPerMov: structure containing information for
+%                                   intensity model fitting parameters
+%                                   estimated from each movie.
 %
 %GLOSSARY:  SM  : single molecule
 %           SMI : sinlge molecule imaging
@@ -162,13 +216,7 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 % Modified by Khuloud Jaqaman, February 2019
 % Extensively modified by Tra H. Ngo, September 2019
 %
-%NOTE KJ 20210716: In the (near) future, change the output of this code
-%such that only the information of particles inside the mask is retained.
-%Then, there is no need for the output variable threshMet. When this change
-%is made here, then smactinPropPerTimeInt must be changed so that it no
-%longer needs/uses threshMet.
-%
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 
@@ -187,93 +235,71 @@ function [smPropPerTimeInt,threshMet, summaryNumTrackAll, numPassDecomptrackAll]
 % 
 % 
 
-
-%% Input control
+%% Input control, Output initializations & definitions:
 if isempty(utrackPackPaths)
     error('error:: single-particle tracking path was not found')
-elseif isempty(qfsmPackPaths)
+elseif isempty(qfsmPackPaths) && sum(smConditions.maskLoc) > 0
     error('error:: speckle information path was not found')
 end
 
-if nargin < 3
-    error('error:: invalid number of input')
-elseif nargin == 3
-    diffModeDividerStruct = []; % if no input for diffModeDividerStruct, make this empty.
+numMovs = length(utrackPackPaths); % number of SM movies being processed
+numFramesFSM = nan(numMovs,1); % number of FSM speckle frame
+numFramesSM  = nan(numMovs,1); % number of SM frame
+smPropPerTimeInt = cell(numMovs,1); % cell array containing SM properties
+threshMet        = cell(numMovs,1); % cell array containing SM indices within mask
+summaryNumTrackAll = []; % initialize table of track summary statistics
+numPassDecomptrackAll = [];  % initialize table of track summary statistics
+
+if ~exist('diffModeDividerStruct','var')
+    diffModeDividerStruct = []; 
 end
 
 if ~exist('smSpanRadius','var')|| isempty(smSpanRadius)
     smSpanRadius = 300/9; % (pixels ~ 3um for pixel size = 90nm)
+    warning('Span radius defaults to 33.33 pixels.')
 end
 
 if ~exist('intensityInfoBackUp','var') || isempty(intensityInfoBackUp)
+    % Only use when movie is composed of a few frames. Used for bug testing
     intensityInfoBackUp = [0.0014,0.0004]; % some value from an arbitrary CD36 movie
 end
 
-%% Initialization & definitions
-numMovs = length(utrackPackPaths); % number of SM movies being processed
-fs = filesep; % define file separator (for different operating systems)
-numFramesFSM = nan(numMovs,1); % number of FSM speckle frame
-numFramesSM = nan(numMovs,1); % number of SM frame
-extlroi = ["external_roi","external_mask1","External_mask","External_ROI","external_ROI", ...
-    "External_Segmentation"]; % vector containing variations in naming of external mask folders
+if ~isfield(smConditions,'max2TracksSize'), smConditions.max2TracksSize = 40; end
+if ~isfield(smConditions,'clean'), smConditions.clean = true(numMovs,1); end
 
-%% Output:
-smPropPerTimeInt = cell(numMovs,1); % cell array containing SM physical metrics to be calculated within this function
-threshMet = cell(numMovs,1); % cell array containing SM indices meeting criteria set by smCondition input
-summaryNumTrackAll = []; % initialize table
-numPassDecomptrackAll = [];  % initialize table
+intensityModelInfoPerMov = struct('variableMean', [], 'modeParam', [], 'intensityInfo', []);
+    
 %% Looping through each sm movie
 for iMov = 1 : numMovs
     
     % if one of the paths are empty, move on to the next listed path
-    if isempty(utrackPackPaths{iMov,1})
-        continue
-    end
+    if isempty(utrackPackPaths{iMov,1}), continue; end
     
     % define smPropPerTimeInt output: each cell contains SM properties calculated for each movie
     smPropPerTimeInt{iMov,1} = struct;
     
-    %% load SM tracks and relevant mask information
+    %% load relevant mask information:    
+    masksDirOut = getSmMask(utrackPackPaths, smConditions.maskLoc, qfsmPackPaths, iMov);
     
-    % load qFSM movie mask (name, folder, etc) to exclude irrelevant SM
-    if ~isempty(qfsmPackPaths{iMov,1}) && smConditions.maskLoc(iMov) ~= 0
-        cd(qfsmPackPaths{iMov,1}) % change directories to search for the mask
-        
-        if smConditions.maskLoc(iMov) == 1
-            try % works with Linux (case-sensitive)
-                masks = dir([qfsmPackPaths{iMov,1} fs char(extlroi(isfolder(extlroi)))]);
-            catch % works with Windows (in non-case-sensitive settings)
-                tmpFold = dir(fullfile(qfsmPackPaths{iMov,1}, 'ext*'));
-                masks = dir(fullfile(qfsmPackPaths{iMov,1}, tmpFold.name));
-            end
-        elseif smConditions.maskLoc(iMov) == 2
-            masks = dir([qfsmPackPaths{iMov,1} fs 'QFSMPackage' fs ...
-                'refined_masks' fs 'refined_masks_for_channel_1']);
-        elseif smConditions.maskLoc(iMov) == 3
-            masks = dir([qfsmPackPaths{iMov,1} fs 'SegmentationPackage' fs ...
-                'refined_masks' fs 'refined_masks_for_channel_1']);
-        else
-            error('Folder of masks does not exist.')
-        end
-        
-    end
-    
-    % load uTrack output in "TrackingPackage/tracks" folder
+    %% load uTrack output "tracksFinal" in "TrackingPackage/tracks" folder:
     try
-        load([utrackPackPaths{iMov,1} fs 'tracks' fs ...
-            'Channel_1_tracking_result.mat'], 'tracksFinal');
+        if smConditions.clean(iMov)
+            load([utrackPackPaths{iMov,1} filesep 'tracks' filesep ...
+                'cleaned_Channel_1_tracking_result.mat'], 'tracksFinal');
+        else
+            load([utrackPackPaths{iMov,1} filesep 'tracks' filesep ...
+                'Channel_1_tracking_result.mat'], 'tracksFinal');
+        end
     catch
-        error('tracksFinal DOES NOT LOAD!!!!!!!!')
+        error('tracksFinal DOES NOT LOAD! When smConditions.clean is not 0, function expects cleaned_Channel_1_tracking_result.mat.')
     end
     
     %% Eliminating obviously useless data
-    
     criteria.lifeTime.min = smConditions.minLft(iMov);
     indxKeep = chooseTracks(tracksFinal,criteria);
     tracksFinal = tracksFinal(indxKeep);
     
     %% Calculate full-length (FL) SM data size
-    
     %KJ 20210714: get number of SM frames from sequence of events
     seqOfEvents = vertcat(tracksFinal.seqOfEvents);
     numFramesSM(iMov) = max(seqOfEvents(:,1));
@@ -300,9 +326,9 @@ for iMov = 1 : numMovs
             windAdd = 1;
             
             %all intervals but first
-            for iFrame = numFramesFSM(iMov) : -1 : 2
-                smPropPerTimeInt{iMov,1}(iFrame,1).smFrames = ...
-                    ((iFrame - 2)*smConditions.windAvg(iMov) + cHalf + 1: (iFrame - 1)*smConditions.windAvg(iMov) + cHalf + 1)';
+            for iFr = numFramesFSM(iMov) : -1 : 2
+                smPropPerTimeInt{iMov,1}(iFr,1).smFrames = ...
+                    ((iFr - 2)*smConditions.windAvg(iMov) + cHalf + 1: (iFr - 1)*smConditions.windAvg(iMov) + cHalf + 1)';
             end
             
             %first interval
@@ -328,10 +354,10 @@ for iMov = 1 : numMovs
                 ((numFramesFSM(iMov) - 2)*smConditions.windAvg(iMov) + 1 : lastFrameSM)';
             
             %assigning all other intervals
-            for iFrame = windFirst : windFirst + (numFramesFSM(iMov) - 3)
-                smPropPerTimeInt{iMov,1}(iFrame,1).smFrames = ...
-                    ((iFrame - windFirst)*smConditions.windAvg(iMov) + 1 : ...
-                    (iFrame + 1 - windFirst)*smConditions.windAvg(iMov) + 1)';
+            for iFr = windFirst : windFirst + (numFramesFSM(iMov) - 3)
+                smPropPerTimeInt{iMov,1}(iFr,1).smFrames = ...
+                    ((iFr - windFirst)*smConditions.windAvg(iMov) + 1 : ...
+                    (iFr + 1 - windFirst)*smConditions.windAvg(iMov) + 1)';
             end
             
         case 1
@@ -349,16 +375,15 @@ for iMov = 1 : numMovs
                 ((numFramesFSM(iMov) - 2)*smConditions.windAvg(iMov) + 1 : lastFrameSM)';
             
             %assigning all other intervals
-            for iFrame = windFirst : windFirst + (numFramesFSM(iMov) - 3)
-                smPropPerTimeInt{iMov,1}(iFrame,1).smFrames = ...
-                    ((iFrame - windFirst)*smConditions.windAvg(iMov) + 1 : ...
-                    (iFrame + 1 - windFirst)*smConditions.windAvg(iMov) + 1)';
+            for iFr = windFirst : windFirst + (numFramesFSM(iMov) - 3)
+                smPropPerTimeInt{iMov,1}(iFr,1).smFrames = ...
+                    ((iFr - windFirst)*smConditions.windAvg(iMov) + 1 : ...
+                    (iFr + 1 - windFirst)*smConditions.windAvg(iMov) + 1)';
             end
             
     end
     
     %% Clean up tracks
-    
     [tracksReform,~] = removeSimultaneousMergeSplit(tracksFinal);
     [tracksReformat] = reformatSplitsMergesKeepLongerLivedSegment(tracksReform);
     thresholdTime = [];
@@ -416,7 +441,11 @@ for iMov = 1 : numMovs
         end
         
     catch
-        intensityInfo = intensityInfoBackUp;
+        if iscell(intensityInfoBackUp) % TN20240501 add intensityFitParam as output 
+            intensityInfo = intensityInfoBackUp{iMov};
+        else
+            intensityInfo = intensityInfoBackUp;
+        end
         warning('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
         warning('Intensity analysis error. Using back-up intensity information.')
         warning('This should only be allowed if user do not care about intensity information')
@@ -424,15 +453,27 @@ for iMov = 1 : numMovs
         warning('!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!')
     end
     
+    try intensityModelInfoPerMov.variableMean{iMov,1} = variableMean; catch, end
+    try intensityModelInfoPerMov.modeParam{iMov,1} = modeParam; catch, end
+    intensityModelInfoPerMov.intensityInfo{iMov,1} = intensityInfo;
+    
     % Get compTrack with oligomeric states
     [compTracksOut] = aggregStateFromCompTracksMIQP(tracksClean,intensityInfo);
     compTrackAltAgg = compTracksOut.alternativeFormatTracks;
     clear tracksClean
     
-    % Decompounded-tracks
+    %% Get merge & split information:
+    try % if there are split or merge events, collect them - added TN20230802
+        [mergesInfo,splitsInfo,mergesInfoSpace,splitsInfoSpace] = ...
+            findMergesSplits(compTracksOut.defaultFormatTracks, 2, 0, 0, 0);
+    catch
+        mergesInfo = []; splitsInfo = []; mergesInfoSpace = []; splitsInfoSpace = [];
+    end
+    
+    %% Decompounded-tracks
     [decompTrack] = decompoundCompTracks(compTrackAltAgg);
     
-    % Count number of tracks that will get split by FSM intervals - TN20220714
+    % Count number of tracks that will get split by FSM intervals
     try
         tmpSmFr = [smPropPerTimeInt{iMov,1}.smFrames]; % matrix of all SMI frames, col = FSM intervals
         fsmSplitFrs = tmpSmFr(end,1:end-1);
@@ -449,141 +490,114 @@ for iMov = 1 : numMovs
     
     windLast = windFirst + windAdd + numFramesFSM(iMov) - 2; % last FSM interval
     
-    for iFrame = windFirst : windLast % looping through each grouped FSM interval (e.g. 50 SM frame are grouped into 1 qFSM frame)
+    for iFr = windFirst : windLast % looping through each grouped FSM interval (e.g. 50 SM frame are grouped into 1 qFSM frame)
         
-        %% Mask coordinates
-        
-        % get mask for each interval from mask of each corresponding FSM frame
-        maskCoord = cell(windLast - windFirst + 1,1);
-        
-        % extract (y,x) coordinates for all pixels within refined, external, or segmented mask
+        % Get mask and (y,x) coordinates for each interval, from mask of corresponding FSM frame
+        maskCoordCurrFrame = [];
         if smConditions.maskLoc(iMov) ~= 0
-            if smConditions.maskLoc(iMov) == 1
-                try
-                    imgMask = imread([qfsmPackPaths{iMov,1} fs char(extlroi(isfolder(extlroi))) fs ...
-                        masks(iFrame + 2).name]);
-                    [maskCoord{iFrame,1}(:,2),maskCoord{iFrame,1}(:,1)] = ...
-                        find(imgMask);
-                catch
-                    imgMask = imread(fullfile(masks(iFrame).folder, masks(iFrame + 2).name));
-                    [maskCoord{iFrame,1}(:,2),maskCoord{iFrame,1}(:,1)] = ...
-                        find(imgMask);
-                end
-            elseif smConditions.maskLoc(iMov) == 2
-                imgMask = imread([qfsmPackPaths{iMov,1} fs 'QFSMPackage' fs 'refined_masks' ...
-                    fs 'refined_masks_for_channel_1' fs masks(iFrame + 2).name]);
-                [maskCoord{iFrame,1}(:,2),maskCoord{iFrame,1}(:,1)] = ...
-                    find(imgMask);
-                
-            elseif smConditions.maskLoc(iMov) == 3
-                imgMask = imread([qfsmPackPaths{iMov,1} fs 'SegmentationPackage' fs 'refined_masks' ...
-                    fs 'refined_masks_for_channel_1' fs masks(iFrame + 2).name]);
-                [maskCoord{iFrame,1}(:,2),maskCoord{iFrame,1}(:,1)] = ...
-                    find(imgMask);
-                
-            end
+            imgMask = imread([masksDirOut{1,1}(iFr + 2).folder filesep masksDirOut{1,1}(iFr + 2).name]);
+        elseif smConditions.maskLoc(iMov) == 0
+            imgMask = imread([masksDirOut{1,1}(3).folder filesep masksDirOut{1,1}(3).name]);
         end
+        [maskCoordCurrFrame(:,2), maskCoordCurrFrame(:,1)] = find(imgMask);
         
-        %% Get tracks in specific FSM interval
+        %% Split tracks into FSM intervals
         
         % Chop tracks into specific interval
-        frameRange = [smPropPerTimeInt{iMov,1}(iFrame).smFrames(1) ...
-            smPropPerTimeInt{iMov,1}(iFrame).smFrames(end)];
-        
+        frameRange = [smPropPerTimeInt{iMov,1}(iFr).smFrames(1)  smPropPerTimeInt{iMov,1}(iFr).smFrames(end)];
         tracksCrop = cropCompTracksFR(decompTrack,frameRange);
         
         if isempty(tracksCrop) % if this frame interval is empty (blacked out), skip to the next frame interval
             continue
         end
         
-        % construct new tracksFinal from tracksCrop
+        % construct new tracksFinal:
         tracksFinal_new = tracksCrop;
         tracksFinal_new = rmfield(tracksFinal_new,'oldTracksInfo');
         
-        %% Analyze diffusion and chop by time and span
+        %% Analyze diffusion & split tracks by TIME:
         
-        % Transient analysis & refinement (including DC-MSS) - TN20200113
+        % Transient analysis & refinement (including DC-MSS) 
         transDiffAnalysisResCrop =  basicTransientDiffusionAnalysisv1(tracksFinal_new,2,0,95); % 2nd/3rd/4th are default inputs
         
-        % Chop by motion type (from DC-MSS) & by time (with MSS redone on
-        % chopped tracklets)
-        [refinedTrackBigSpan, measurementsBigSpan, cntTrackBigSpan] = basicTransientTrackCrop(transDiffAnalysisResCrop, tracksFinal_new); close all;
+        % Chop by motion type (from DC-MSS) & by time (with MSS redone on chopped tracklets)
+        [refinedTrackBigSpan, measurementsBigSpan, cntTrackBigSpan, ~] = ...
+            basicTransientTrackCrop(transDiffAnalysisResCrop, tracksFinal_new, smConditions.max2TracksSize); close all;
         
+        %% Analyze diffusion & split tracks by SPAN:
         % Chop by span of each tracklet within "actin domains"
+        
         [refinedTrack, measurements, numBigSpan] = basicTransientTrackChopBySpan(refinedTrackBigSpan, measurementsBigSpan, smSpanRadius);
         
-        %% Count number of tracks per chopping - Added TN20220403
+        %% Analyze diffusion mode:
+        diffModeAnalysisRes = trackDiffModeAnalysis(refinedTrack, diffModeDividerStruct);
+        
+        %% Count number of tracks per chopping 
         summaryNumTrack = countNumTrackletsMultChop(tracksFinal_new, transDiffAnalysisResCrop, refinedTrackBigSpan, refinedTrack, cntTrackBigSpan,numBigSpan);
-        summaryNumTrack = horzcat(table(iMov, iFrame), summaryNumTrack);
+        summaryNumTrack = horzcat(table(iMov, iFr), summaryNumTrack);
         summaryNumTrackAll = vertcat(summaryNumTrackAll, summaryNumTrack);
         
         %% Get list of SM in this interval
-
-        % reorganize cropped SM tracks information into matrix format
-        trackedFeatureInfo = convStruct2MatIgnoreMS(refinedTrack,1);
         
-        % matrix of x/y-coordinate of SM equipvalently ranged (col1-51)
-        % appropriate to this specific frameRange.
+        % Convert cropped SM tracks information into matrix:
+        [trackedFeatureInfo,~,~,~,aggregStateMat] = convStruct2MatIgnoreMS(refinedTrack,1);
+        
+        % Get matrix of x/y-coordinate of SM within this specific frameRange.
         xyInterval = cat(3,trackedFeatureInfo(:,1 : 8 : end),trackedFeatureInfo(:,2 : 8 : end));
         
-        % average position of each SM track in a particular interval
+        % Get mean position of each SM track in this interval.
         xyMean = [nanmean(xyInterval(:,:,1),2), nanmean(xyInterval(:,:,2),2)];
         
         % enumerate SM (vector of indices of existing particles in this interval)
         indxNoNan = find(~isnan(xyMean(:,1)));
-        smPropPerTimeInt{iMov,1}(iFrame,1).smList = indxNoNan;
+        smPropPerTimeInt{iMov,1}(iFr,1).smList = indxNoNan;
         
         %matrix of existing SM tracks within a particular interval
         existTracks = xyInterval(indxNoNan,:,1);
-                
+        
         %% Extraction/calculation of various SM properties (many from above diffusion and assembly state analysis)
         
-        % average position of SM particles relevant to this particular interval
-        % stored in (x,y) coordinates
-        smPropPerTimeInt{iMov,1}(iFrame,1).meanPos = [xyMean(indxNoNan,1), xyMean(indxNoNan,2)];
+        % Mean position of SM particles in this particular FSM interval, in (x,y) coordinates
+        smPropPerTimeInt{iMov,1}(iFr,1).meanPos = [xyMean(indxNoNan,1), xyMean(indxNoNan,2)];
         
         % Amplitude of SM (matrix)
         ampMat = trackedFeatureInfo(:,4 : 8 : end);
         ampMean = nanmean(ampMat,2);
-        smPropPerTimeInt{iMov,1}(iFrame,1).meanAmp = ampMean(indxNoNan);
+        smPropPerTimeInt{iMov,1}(iFr,1).meanAmp = ampMean(indxNoNan);
         
         % motion classification for SM particle existing in this interval
-        smPropPerTimeInt{iMov,1}(iFrame,1).trackClass = ...
-            measurements(indxNoNan,1);
+        smPropPerTimeInt{iMov,1}(iFr,1).trackClass = measurements(indxNoNan,1);
         
         % diffusion coefficient for SM existing in this interval
-        smPropPerTimeInt{iMov,1}(iFrame,1).diffCoef = ...
-            measurements(indxNoNan,3);
+        smPropPerTimeInt{iMov,1}(iFr,1).diffCoef = measurements(indxNoNan,3);
         
-        % confinement radius
-        smPropPerTimeInt{iMov,1}(iFrame,1).confRad = ...
-            measurements(indxNoNan,2);
+        % Confinement radius
+        smPropPerTimeInt{iMov,1}(iFr,1).confRad = measurements(indxNoNan,2);
         
-        % oligomeric state
-        uniqueVect = nan(length(refinedTrack),1);
-        for i = 1:length(refinedTrack)
-            %KJ 20210715: Replaced Tra's original code (commented out)
-            %with simpler line, as checking uniqueness is an overkill
-            %             uniqueVect0 = unique(refinedTrack(i).aggregState);
-            %             uniqueVect0 = uniqueVect0(~isnan(uniqueVect0));
-            %             if length(uniqueVect0) ~= 1
-            %                 error('Each decomptrack is not 1 unique oligomeric state as expected!')
-            %             end
-            %             uniqueVect(i,1) = uniqueVect0;
-            uniqueVect(i,1) = refinedTrack(i).aggregState(1);
-        end
-        smPropPerTimeInt{iMov,1}(iFrame,1).aggregState = uniqueVect(indxNoNan);
+        % MSS slope
+        smPropPerTimeInt{iMov,1}(iFr,1).mssSlope = measurements(indxNoNan,4);
         
-        % calculate .meanDisp (mean displacement, for the track, over this interval),
-        smPropPerTimeInt{iMov,1}(iFrame,1).meanDisp = ...
-            nanmean(sqrt((xyInterval(indxNoNan,2 : end,1) - ...
-            xyInterval(indxNoNan,1 : end - 1,1)) .^ 2 + ...
-            (xyInterval(indxNoNan,2 : end,2) - ...
-            xyInterval(indxNoNan,1 : end - 1,2)) .^ 2),2);
+        % Oligomeric state
+        smPropPerTimeInt{iMov,1}(iFr,1).aggregState = nanmean(aggregStateMat,2);
+        
+        % Calculate .meanDisp (mean displacement, for the track, over this
+        % interval), ignoring gap closing (i.e., i-gap-k then 1
+        % displacement is d(i,k))
+        f2fDispMagnitude = sqrt((diff(xyInterval(indxNoNan,:,1), 1, 2)) .^ 2 + ...
+            (diff(xyInterval(indxNoNan,:,2), 1, 2)) .^ 2);
+        smPropPerTimeInt{iMov,1}(iFr,1).meanDisp = nanmean(f2fDispMagnitude,2);
+        
+        % Properties from Mode analysis - TN20240320:
+        tmp = [diffModeAnalysisRes.diffMode]'; smPropPerTimeInt{iMov,1}(iFr,1).mDiffMode = tmp(indxNoNan,:); %Diffusion mode.
+        tmp = [diffModeAnalysisRes.diffCoef]'; smPropPerTimeInt{iMov,1}(iFr,1).mDiffCoef = tmp(indxNoNan,:);  % Diffusion coefficient from mean square F2F displacement
+        tmp = [diffModeAnalysisRes.msdF2F]'; smPropPerTimeInt{iMov,1}(iFr,1).mMsdF2F = tmp(indxNoNan,:);   % Mean square F2F displacement.
+        tmp = [diffModeAnalysisRes.meanPosStd]'; smPropPerTimeInt{iMov,1}(iFr,1).mMeanPosStd = tmp(indxNoNan,:);  % Mean positonal standard deviation.
+        tmp = [diffModeAnalysisRes.diffRadius]'; smPropPerTimeInt{iMov,1}(iFr,1).mDiffRadius = tmp(indxNoNan,:);  % Diffusion radius.
+        tmp = [diffModeAnalysisRes.lifetime]'; smPropPerTimeInt{iMov,1}(iFr,1).mLifetime = tmp(indxNoNan,:);  % Track lifetime.
         
         %% SM local density
         
-        availFrame = min(size(smPropPerTimeInt{iMov,1}(iFrame,1).smFrames,1),size(xyInterval,2)); % in case xyInterval doesn't have the full length of (fsmInterval+1)
+        availFrame = min(size(smPropPerTimeInt{iMov,1}(iFr,1).smFrames,1),size(xyInterval,2)); % in case xyInterval doesn't have the full length of (fsmInterval+1)
         
         for iSmFrame = 1:availFrame
             
@@ -606,10 +620,10 @@ for iMov = 1 : numMovs
                 % if SM detection doesn't exist, input NaN.
                 % TN 20191010
                 if  sum(mtchIndex) ~= 0
-                    smPropPerTimeInt{iMov}(iFrame).smDensityPerFr(iCol,iSmFrame) = sum(mtchIndex)/...
+                    smPropPerTimeInt{iMov}(iFr).smDensityPerFr(iCol,iSmFrame) = sum(mtchIndex)/...
                         (pi*((smConditions.rad_density(iMov)) ^ 2));
                 else
-                    smPropPerTimeInt{iMov}(iFrame).smDensityPerFr(iCol,iSmFrame) = NaN;
+                    smPropPerTimeInt{iMov}(iFr).smDensityPerFr(iCol,iSmFrame) = NaN;
                 end
                 
             end
@@ -618,149 +632,185 @@ for iMov = 1 : numMovs
         
         % calculate local SM density per FSM interval (density = number of SM per pixel)
         % .smDensity (over neighborhood of input-defined radius, averaging this interval)
-        smPropPerTimeInt{iMov}(iFrame).smDensity(:,1) = ...
-            nanmean(smPropPerTimeInt{iMov}(iFrame).smDensityPerFr,2);
+        smPropPerTimeInt{iMov}(iFr).meanSmDensity(:,1) = ...
+            nanmean(smPropPerTimeInt{iMov}(iFr).smDensityPerFr,2);
         
         %% Calculation of various other SM properties
         
         if isempty(indxNoNan)
             
-            smPropPerTimeInt{iMov,1}(iFrame,1).lifetime = zeros(0,1);
-            smPropPerTimeInt{iMov,1}(iFrame,1).numObservations = zeros(0,1);
-            smPropPerTimeInt{iMov,1}(iFrame,1).smFramesExist = zeros(0,1);
-            smPropPerTimeInt{iMov,1}(iFrame,1).netVelocity = zeros(0,2);
-            smPropPerTimeInt{iMov,1}(iFrame,1).netSpeed = zeros(0,1);
-            smPropPerTimeInt{iMov,1}(iFrame,1).netVelAngle = zeros(0,1);
-            smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr = zeros(0,2);
-            smPropPerTimeInt{iMov,1}(iFrame,1).maskDensity = 0;
-            threshMet{iMov,1}{iFrame,1} = [];
+            smPropPerTimeInt{iMov,1}(iFr,1).lifetime = zeros(0,1);
+            smPropPerTimeInt{iMov,1}(iFr,1).numObservations = zeros(0,1);
+            smPropPerTimeInt{iMov,1}(iFr,1).smFramesExist = zeros(0,1);
+            smPropPerTimeInt{iMov,1}(iFr,1).netVelocity = zeros(0,2);
+            smPropPerTimeInt{iMov,1}(iFr,1).netSpeed = zeros(0,1);
+            smPropPerTimeInt{iMov,1}(iFr,1).netVelAngle = zeros(0,1);
+            smPropPerTimeInt{iMov,1}(iFr,1).indiPosPerFr = zeros(0,2);
+            smPropPerTimeInt{iMov,1}(iFr,1).maskDensity = 0;
+            threshMet{iMov,1}{iFr,1} = [];
             
         else
             
             for kTrack = 1 : length(indxNoNan)
                 
-                % (vector of) SM frame numbers which an SM track exists in (in a particular FSM interval)
-                temp = find(~isnan(existTracks(kTrack,:)))';
+                % (vector of) SM frame numbers at which this SM track exists in (in this particular FSM interval)
+                frExist = find(~isnan(existTracks(kTrack,:)))';
+                smPropPerTimeInt{iMov,1}(iFr,1).smFramesExist{kTrack,1} = frExist;
                 
                 % lifetime of this existing SM track (in a particular interval)
-                smPropPerTimeInt{iMov,1}(iFrame,1).lifetime(kTrack,1) = temp(end) - temp(1) + 1;
+                smPropPerTimeInt{iMov,1}(iFr,1).lifetime(kTrack,1) = frExist(end) - frExist(1) + 1;
                 
                 % number of observations (actual detection, not closed gap)
                 % for an existing SM track (in a particular interval)
-                smPropPerTimeInt{iMov,1}(iFrame,1).numObservations(kTrack,1) = ...
-                    length(temp);
+                smPropPerTimeInt{iMov,1}(iFr,1).numObservations(kTrack,1) = length(frExist);
                 
-                % SM frames at which this track exists (in a particular FSM interval)
-                smPropPerTimeInt{iMov,1}(iFrame,1).smFramesExist{kTrack,1} = ...
-                    temp;
-                                
-                % Net Velocity of this existing SM track (in a particular
-                % interval)
+                % Net velocity of this SM track (in this particular interval)
                 % net velocity = (total distance displaced (|x|,|y|) in
                 % pixels)/(total time passed (in number of SM frame intervals))
-                smPropPerTimeInt{iMov,1}(iFrame,1).netVelocity(kTrack,:) = ...
-                    (xyInterval(indxNoNan(kTrack),temp(end),:) - ...
-                    xyInterval(indxNoNan(kTrack),temp(1),:)) / ...
-                    (smPropPerTimeInt{iMov,1}(iFrame,1).lifetime(kTrack) - 1);
+                smPropPerTimeInt{iMov,1}(iFr,1).netVelocity(kTrack,:) = ...
+                    (xyInterval(indxNoNan(kTrack),frExist(end),:) - ...
+                    xyInterval(indxNoNan(kTrack),frExist(1),:)) / ...
+                    (smPropPerTimeInt{iMov,1}(iFr,1).lifetime(kTrack) - 1);
                 
-                % Net Speed for an existing SM track (in a particular
-                % interval) (along the 2D plane)
+                % Net speed for this SM track (in this particular interval) (along the 2D plane)
                 % net speed = sqrt(dx^2 + dy^2)/time (pixel/SM frame intervals)
-                smPropPerTimeInt{iMov,1}(iFrame,1).netSpeed(kTrack,1) = ...
-                    sqrt(sum(smPropPerTimeInt{iMov,1}(iFrame,1).netVelocity(kTrack,:) .^ 2));
+                smPropPerTimeInt{iMov,1}(iFr,1).netSpeed(kTrack,1) = ...
+                    norm(smPropPerTimeInt{iMov,1}(iFr,1).netVelocity(kTrack,:));
                 
                 % net velocity angle (taken w.r.t image coordinate system)
                 % of an existing SM track (in a particular interval)
                 % range of netVelAngle = [-90, 90]
-                smPropPerTimeInt{iMov,1}(iFrame,1).netVelAngle(kTrack,1) = ...
-                    atand(smPropPerTimeInt{iMov,1}(iFrame,1).netVelocity(kTrack,2) / ...
-                    smPropPerTimeInt{iMov,1}(iFrame,1).netVelocity(kTrack,1));
+                smPropPerTimeInt{iMov,1}(iFr,1).netVelAngle(kTrack,1) = ...
+                    atand(smPropPerTimeInt{iMov,1}(iFr,1).netVelocity(kTrack,2) / ...
+                    smPropPerTimeInt{iMov,1}(iFr,1).netVelocity(kTrack,1));
                 
-                % (x,y) coordinates of SM at every SM frame
+                % (x,y) coordinates of this SM at every SMI frame
                 posVect = [xyInterval(indxNoNan(kTrack),:,1)' xyInterval(indxNoNan(kTrack),:,2)']; % vector of (x,y) positions of sm track
-                smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack,1} = posVect(temp,:);
+                smPropPerTimeInt{iMov,1}(iFr,1).indiPosPerFr{kTrack,1} = posVect(frExist(1):frExist(end),:); % NaN = where Gap
                 
-                % 20220909 TN adds randomization of SM tracks (moving SM
-                % tracks from its original location to somewhere else on
-                % the eroded mask)
+                % Amplitude of this SM at every SMI frame
+                smPropPerTimeInt{iMov,1}(iFr,1).f2fAmp{kTrack,1} = ampMat(indxNoNan(kTrack),frExist(1):frExist(end))'; % NaN = where Gap
+                
+                % Randomization of SM tracks (moving SM tracks from its
+                % original location to somewhere else on the eroded mask) - TN 20220909
+                
                 if isfield(smConditions,'randFlag')
                     switch smConditions.randFlag(iMov)
                         case 1 % if smConditions.randFlag(iMov) == 1, then randomize track position to any location in mask ROI
                             
-                            if ismember(round(smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:)), [maskCoord{iFrame,1}(:,1),maskCoord{iFrame,1}(:,2)],'rows')
-                                % if current track is inside mask, then randomize
-                                % it; if current track is outside mask, then let it
-                                % be.
-                                if ~isnan(smPropPerTimeInt{iMov,1}(iFrame,1).confRad(kTrack,1))
+                            if ismember(round(smPropPerTimeInt{iMov,1}(iFr,1).meanPos(kTrack,:)), [maskCoordCurrFrame(:,1),maskCoordCurrFrame(:,2)],'rows')
+                                % If current track is inside the mask,
+                                % randomize it. If current track is outside
+                                % the mask, ignore it.
+                                
+                                if ~isnan(smPropPerTimeInt{iMov,1}(iFr,1).confRad(kTrack,1))
                                     % NaN span indicates that track only contain 1
                                     % detection. If that's the case, do no
                                     % randomization.
                                     
-                                    % Erode current mask
-                                    se_tmp = strel('disk', round(smPropPerTimeInt{iMov,1}(iFrame,1).confRad(kTrack,1)/2)); % built an element to erode by radius of SM we want to move
+                                    % STEP 0: Make the image's edges 0
+                                    imgMask(1:end,[1,end]) = 0;
+                                    imgMask([1,end],1:end) = 0;
+                                    
+                                    % STEP 1: Erode current mask
+                                    se_tmp = strel('disk', round(smPropPerTimeInt{iMov,1}(iFr,1).confRad(kTrack,1)/2)); % built an element to erode by radius of SM we want to move
                                     imgMaskErode = imerode(imgMask,se_tmp);
-                                    se_tmp2 = strel('disk', round(smPropPerTimeInt{iMov,1}(iFrame,1).confRad(kTrack,1)/4)); % built an element to erode by radius of SM we want to move
+                                    
+                                    % Check if mask still exist after erosion and opening
+                                    if sum(sum(imgMaskErode)) == 0 % If mask after the first erosion is completely removed
+                                        % Then we have to re-erode with smaller element.
+                                        warning('Erosion by radius/2 completely removed cell mask. Redo erosion with smaller element.')
+                                        se_tmp = strel('disk', round(smPropPerTimeInt{iMov,1}(iFr,1).confRad(kTrack,1)/4)); % built an element to erode by radius of SM we want to move
+                                        imgMaskErode = imerode(imgMask,se_tmp);
+                                    end
+                                    
+                                    se_tmp2 = strel('disk', round(smPropPerTimeInt{iMov,1}(iFr,1).confRad(kTrack,1)/4)); % built an element to erode by radius of SM we want to move
                                     imgMaskRefined = imopen(imgMaskErode, se_tmp2); % remove the small disconnected mask from the main mask
                                     
-                                    % Find a new randomized position within eroded mask
-                                    [maskCoordRefined_tmp(:,2), maskCoordRefined_tmp(:,1)] = find(imgMaskRefined);
-                                    randPos_tmp = datasample(maskCoordRefined_tmp,1);
+                                    if sum(sum(imgMaskRefined)) == 0 % If mask after the first erosion is completely removed
+                                        % Then we have to redo erosion
+                                        warning('Opening by radius/4 completely removed cell mask. Redo opening with smaller element.')
+                                        se_tmp2 = strel('disk', round(smPropPerTimeInt{iMov,1}(iFr,1).confRad(kTrack,1)/8)); % built an element to erode by radius of SM we want to move
+                                        imgMaskRefined = imopen(imgMaskErode, se_tmp2); % remove the small disconnected mask from the main mask
+                                    end
+                                    
+                                    % STEP 2: Find a new randomized position within eroded mask
+                                    [maskCoordRefined_tmp_2, maskCoordRefined_tmp_1] = find(imgMaskRefined);
+                                    randPos_tmp = datasample(horzcat(maskCoordRefined_tmp_1, maskCoordRefined_tmp_2),1);
                                     %figure, imshow(imgMask), hold on, scatter(randPos_tmp(1,1),randPos_tmp(1,2),'x'); % debug to make sure randomized position is within eroded mask
-                                    %scatter(smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,1),smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,2),'o'); % debug to visualize old track position (utrack & SMI-FSM report image coordinate)
+                                    %scatter(smPropPerTimeInt{iMov,1}(iFr,1).meanPos(kTrack,1),smPropPerTimeInt{iMov,1}(iFr,1).meanPos(kTrack,2),'o'); % debug to visualize old track position (utrack & SMI-FSM report image coordinate)
                                     
                                     % Find displacement vector to translate SM track mean position to new position
-                                    displacementVect_tmp = randPos_tmp - smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:);
+                                    displacementVect_tmp = randPos_tmp - smPropPerTimeInt{iMov,1}(iFr,1).meanPos(kTrack,:);
                                     
                                     % Translate the SM track mean position and every SM track
                                     % detections at each timepoint to new position
                                     %plot(smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack}(:,1),smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack}(:,2),'d-','Color','b') % debug to visualize old track position (image coordinate)
                                     
-                                    smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:) = randPos_tmp; % equivalent to: smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:) + displacementVect_tmp;
-                                    smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack} = smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack} + displacementVect_tmp;
+                                    smPropPerTimeInt{iMov,1}(iFr,1).meanPos(kTrack,:) = randPos_tmp; % equivalent to: smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:) + displacementVect_tmp;
+                                    newTrack = smPropPerTimeInt{iMov,1}(iFr,1).indiPosPerFr{kTrack} + displacementVect_tmp;
                                     %plot(smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack}(:,1),smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack}(:,2),'d-','Color','y') % debug to visualize NEW track position (image coordinate)
                                     
-                                    clear maskCoordRefined_tmp se_tmp se_tmp2 imgMaskErode imgMaskRefined randPos_tmp displacementVect_tmp
+                                    smPropPerTimeInt{iMov,1}(iFr,1).indiPosPerFr{kTrack} = fitTrackInImg(newTrack, imgMaskRefined);
+                                    
+                                    clear se_tmp se_tmp2 imgMaskErode imgMaskRefined randPos_tmp displacementVect_tmp newTrack
                                 end % ( if ~isnan(smPropPerTimeInt{iMov,1}(iFrame,1).confRad(kTrack,1))  )
-                            end % (   ismember(round(smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:)), [maskCoord{iFrame,1}(:,1),maskCoord{iFrame,1}(:,2)],'rows')    )
-                        
-                        
+                            end % (   ismember(round(smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:)), [maskCoordCurrFrame(:,1),maskCoordCurrFrame(:,2)],'rows')    )
+                            
                         otherwise % if smConditions.randFlag(iMov) == -M, then shift track position M pixels to the right.
                             
                             if smConditions.randFlag(iMov) < 0
                                 M = abs(smConditions.randFlag(iMov)); % shift distance
                                 % Translate the SM track mean position and every SM track
                                 % detections at each timepoint to new position
-                                smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,1) = smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,1) + M; % equivalent to: smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:) + displacementVect_tmp;
-                                smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack}(:,1) = smPropPerTimeInt{iMov,1}(iFrame,1).indiPosPerFr{kTrack}(:,1) + M;
-                                
+                                smPropPerTimeInt{iMov,1}(iFr,1).meanPos(kTrack,1) = smPropPerTimeInt{iMov,1}(iFr,1).meanPos(kTrack,1) + M; % equivalent to: smPropPerTimeInt{iMov,1}(iFrame,1).meanPos(kTrack,:) + displacementVect_tmp;
+                                smPropPerTimeInt{iMov,1}(iFr,1).indiPosPerFr{kTrack}(:,1) = smPropPerTimeInt{iMov,1}(iFr,1).indiPosPerFr{kTrack}(:,1) + M;
                             end % (  if smConditions.randFlag(iMov) < 0  )
-                            
-
-                    end % (   switch smConditions.randFlag(iMov)   )
-                end %   (   smConditions.randFlag(iMov) == 1   )
+                    end %    switch smConditions.randFlag(iMov)
+                end %   if isfield(smConditions,'randFlag')
+                
+                % Frame-to-frame displacement: - added TN20230209
+                smPropPerTimeInt{iMov,1}(iFr,1).f2fDisplacement{kTrack,1} = [diff(smPropPerTimeInt{iMov,1}(iFr,1).indiPosPerFr{kTrack,1},1,1);NaN,NaN]; % NaN = where Gap
+                smPropPerTimeInt{iMov,1}(iFr,1).f2fDisplacementMag{kTrack,1} = vecnorm(smPropPerTimeInt{iMov,1}(iFr,1).f2fDisplacement{kTrack,1},2,2);
+                smPropPerTimeInt{iMov,1}(iFr,1).f2fDisplMovAvg{kTrack,1} = movmean(smPropPerTimeInt{iMov,1}(iFr,1).f2fDisplacementMag{kTrack,1}, 5, "omitnan");
                 
             end %(for kTrack = 1 : length(indxNoNan))
             
-            if smConditions.maskLoc(iMov) ~= 0
+            if ~isempty(maskCoordCurrFrame(:,1))
                 
                 % find the "valid" SM tracks whose mean position is within the mask
-                threshMet{iMov,1}{iFrame,1} = find(ismember(round(smPropPerTimeInt ...
-                    {iMov,1}(iFrame,1).meanPos), [maskCoord{iFrame,1}(:,1),maskCoord{iFrame,1}(:,2)],'rows'));
+                threshMet{iMov,1}{iFr,1} = find(ismember(round(smPropPerTimeInt ...
+                    {iMov,1}(iFr,1).meanPos), [maskCoordCurrFrame(:,1),maskCoordCurrFrame(:,2)],'rows'));
                 
                 % calculate mask density (# of tracks per pixel)
                 % = number of valid SM tracks / area of mask
-                smPropPerTimeInt{iMov,1}(iFrame,1).maskDensity = ...
-                    length(indxNoNan(threshMet{iMov,1}{iFrame,1})) / length(maskCoord{iFrame,1}(:,1));
+                smPropPerTimeInt{iMov,1}(iFr,1).maskDensity = ...
+                    length(indxNoNan(threshMet{iMov,1}{iFr,1})) / length(maskCoordCurrFrame(:,1));
                 
             else
                 
                 % if there is no mask, only find the SM that exist longer
                 % than input-defined minimum lifetime
-                threshMet{iMov,1}{iFrame,1} = ...
-                    1:length(smPropPerTimeInt{iMov,1}(iFrame,1).lifetime);
+                threshMet{iMov,1}{iFr,1} = ...
+                    1:length(smPropPerTimeInt{iMov,1}(iFr,1).lifetime);
                 
-                smPropPerTimeInt{iMov,1}(iFrame,1).maskDensity = NaN; %% SHOULD BE # OF TRACKS / IMAGE AREA (but there's no easy way of getting this info)
+                smPropPerTimeInt{iMov,1}(iFr,1).maskDensity = NaN; %% SHOULD BE # OF TRACKS / IMAGE AREA (but there's no easy way of getting this info)
                 
+            end
+            
+            %% Get merging and splitting information
+            smPropPerTimeInt{iMov,1}(iFr,1).mergeInfoSpace = [];
+            for kCol = 1:(size(mergesInfo,2)-3)
+                mergeIndx = ismember(mergesInfo(:,kCol+3), smPropPerTimeInt{iMov,1}(iFr).smFrames);
+                mergeLoc = mergesInfoSpace(mergeIndx, [(2*kCol-1)  2*kCol]);
+                smPropPerTimeInt{iMov,1}(iFr,1).mergeInfoSpace = vertcat(smPropPerTimeInt{iMov,1}(iFr,1).mergeInfoSpace, mergeLoc);
+            end
+            
+            smPropPerTimeInt{iMov,1}(iFr,1).splitInfoSpace = [];
+            for kCol = 1:(size(splitsInfo,2)-3)
+                splitIndx = ismember(splitsInfo(:,kCol+3), smPropPerTimeInt{iMov,1}(iFr).smFrames);
+                splitLoc = splitsInfoSpace(splitIndx, [(2*kCol-1)  2*kCol]);
+                smPropPerTimeInt{iMov,1}(iFr,1).splitInfoSpace = vertcat(smPropPerTimeInt{iMov,1}(iFr,1).splitInfoSpace, splitLoc);
             end
             
         end %(if isempty(indxNoNan))

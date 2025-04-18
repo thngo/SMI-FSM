@@ -156,7 +156,7 @@ function [thresholdsTable, inputParam, varOfResid, evalInfoBIC, biphasicThreshAr
 %Tra Ngo, July 2020. Modified August 2021.
 %REMARK: In the future, need to load/create default matchindx and smactinFlag
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 
