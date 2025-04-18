@@ -6,10 +6,10 @@ function [actinPropPerTimeInt] = actinPropPerTimeInterval(qfsmPackPaths, actinCo
 %INPUT:   qfsmPackPaths : (n x 1 cell) paths leading to QFSM Package results.
 %
 %       actinConditions : (structure) parameters for processing speckles;
-%                         contains the following fields: 
+%                         contains the following fields:
 %
-%                        .rad_density: (n x 1 vector of integer) search radius for 
-%                                     neighboring speckles for individual speckle 
+%                        .rad_density: (n x 1 vector of integer) search radius for
+%                                     neighboring speckles for individual speckle
 %                                     density calculation. Recommended value: 7
 %
 %                        .maskLoc    : (n x 1 vector of integer) flag indicating
@@ -18,14 +18,17 @@ function [actinPropPerTimeInt] = actinPropPerTimeInterval(qfsmPackPaths, actinCo
 %                                  masks within path provided in
 %                                  qfsmPackPaths (make sure folder name
 %                                  follows a name in extlroi variable.)
-%                            = 1 : there exists a folder with refined
-%                                  masks within the QFSMPackage folder
-%                                  provided in qfsmPackPaths
+%                            = 1 : externalROI or segmentation package's
+%                                  mask (for MANUAL user hand-drawn mask).
+%                                  There exists a folder with refined
+%                                  masks within the SegmentationPackage (or
+%                                  WindowingPackage) folder provided in 
+%                                  qfsmPackPaths.
 %                            = 2 : there exists a folder with refined
-%                                  masks within the SegmentationPackage
-%                                  folder provided in qfsmPackPaths
+%                                  masks within the QFSMPackage folder
+%                                  provided in qfsmPackPaths (AUTOMATED
+%                                  detection by QFSM package).
 %                            If [] or other values, code will crash.
-%                            (TN.AD. 20211119)
 %
 %                        .pos_std    : (n x 1 vector of integer) flag for
 %                                     adding noise into speckle position data.
@@ -33,7 +36,7 @@ function [actinPropPerTimeInt] = actinPropPerTimeInterval(qfsmPackPaths, actinCo
 %                                          positions. Noise follows Normal ~ (0,(15nm/90).^2)
 %                                    = 0 or any value not 1: No noise added.
 %
-%                        .minLft     : (n x 1 vector of integer) minimum speckle 
+%                        .minLft     : (n x 1 vector of integer) minimum speckle
 %                                  lifetime to use in analysis. Recommended
 %                                  value: 2 (to remove "ghost" speckles)
 %
@@ -56,22 +59,24 @@ function [actinPropPerTimeInt] = actinPropPerTimeInterval(qfsmPackPaths, actinCo
 %               .speckleMidPos    : The speckle midpoint position between 2
 %                                   FSM frames of an FSM interval (units: pixels)
 %
-%               .speckleVelocity  : The speckle velocity (displacement) from 
-%                                   a frame to the next (units: pixels/frame)
+%               .speckleVelocity  : The speckle velocity (displacement) from
+%                                   a frame to the next frame (units: pixels/frame)
+%                                   = NaN if that speckle does not exist in
+%                                   the next frame.
 %
-%               .speckleSpeed     : The speckle speed (displacement magnitude) 
+%               .speckleSpeed     : The speckle speed (displacement magnitude)
 %                                   from one FSM frame to the next (units: pixels/frame)
 %
-%               .speckleMvmtCohere: The average comovement between a speckle 
+%               .speckleMvmtCohere: The average comovement between a speckle
 %                                   and its neighboring speckles.
 %
-%               .maskDensity      : The number of speckles within a cell ROI 
+%               .maskDensity      : The number of speckles within a cell ROI
 %                                   mask divided by the number of pixels
 %                                   comprising the mask.
 %
 %               .indxMask         : Indices of the mask obtained from QFSM package
 %
-%               .ILmax            : intensity of a specific speckle, as 
+%               .ILmax            : intensity of a specific speckle, as
 %                                   reported from QFSM package.
 %
 %               .IBkg             : background intensity around a specific
@@ -87,7 +92,7 @@ function [actinPropPerTimeInt] = actinPropPerTimeInterval(qfsmPackPaths, actinCo
 % modified: Tra H Ngo, February 2019 (remove ghost speckle)
 % modified: Tra H Ngo, Aug. 2019 (add speckleLifetime properties)
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 
@@ -113,29 +118,39 @@ maps = cell(numMovs,1);
 actinPropPerTimeInt = cell(numMovs,1);
 fsmFrames = nan(numMovs,1);
 
-% %naming possible combinations of external masking names which were used in
-% %the past. Fourth option may be applied most often as of June 2018
-extlroi = ["external_roi","external_mask1","External_mask","External_ROI","external_ROI", ...
-    "External_Segmentation"];
-% as of February 2019, we have decided that refined_masks from Segmentation
-% packages are the same as those from External_ROI, making option 1
-% and 3 similar
-
 for i = 1 : numMovs
-    
+    %% Get number of FSM frames
     %field names for the variables found in the kineticAnalysis folder
     maps{i,1} = dir(strcat([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'kineticAnalysis' fs '*.mat']));
+    if isempty(maps{i,1})
+        warning('Structure of QFSM kinetic analysis folder is not as expected.')
+        warning('Automatic debugging. Contact developers for details.')
+        kineticAnalysisFolder = dir([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'kineticAnalysis']);
+        indxPotentialResFolder = find([kineticAnalysisFolder(3:end).isdir]);
+        if length(indxPotentialResFolder) == 1
+            subfolderName = kineticAnalysisFolder(indxPotentialResFolder+2).name;
+            kinAnalysisFolder_updated = [kineticAnalysisFolder(indxPotentialResFolder+2).folder fs subfolderName];
+            maps{i,1} = dir(strcat([kinAnalysisFolder_updated fs '*.mat']));
+        else
+            error('Cannot find results of QFSM kinetic analysis.')
+        end
+    end
+    
     fsmFrames(i,1) = length(maps{i,1});
     
-    %skip an element in the cell if path does not exist.
+    %% If path does not exist, skip to the next movie
     if isempty(qfsmPackPaths{i,1})
         continue
     end
     
-    % Load speckle tracks (MPM)
-    load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckleTracks' fs '_tracks.mat'], 'MPM');
-    
-    
+    %% Load & analyze speckle tracks (MPM)
+    try
+        load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckleTracks' fs '_tracks.mat'], 'MPM');
+    catch % 20230427: with Glass4h dataset, output of QFSM is no longer named "_tracks.mat" but was named "m-01-01.tif Channel 1_tracks.mat"
+        tmpFsmNames = dir([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckleTracks']);
+        tmpFsmResName = tmpFsmNames(3).name;
+        load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckleTracks' fs tmpFsmResName], 'MPM');
+    end
     % remove ghost speckles and calculate speckle lifetime properties
     [MPM,lifetimeMPM] = retainMPMminLifetime(MPM, actinConditions.minLft(i));
     
@@ -150,9 +165,7 @@ for i = 1 : numMovs
         flagCompleteLft(iRow,end-2*lifetimeMPM(iRow,end)+1:end) = 0;
     end
     
-
-    %TN2019: replace zeros with NaN
-    MPM(MPM == 0) = NaN; MPM(:,end + 1 : end + 2) = NaN;
+    MPM(MPM == 0) = NaN; MPM(:,end + 1 : end + 2) = NaN; %TN2019: replace zeros with NaN
     
     if actinConditions.pos_std(i) == 1, noise = normrnd(0,15/90,size(MPM)); MPM = MPM + noise; end
     
@@ -169,68 +182,42 @@ for i = 1 : numMovs
         'ILmax', [], 'IBkg', [], 'ILmaxNeighb', [], 'IBkgNeighb', []),...
         fsmFrames(i,1),1);
     
-    
-    if ~isempty(qfsmPackPaths{i,1}) && actinConditions.maskLoc(i) ~= 0
-        
-        %change directory to path to look for folder
-        cd(qfsmPackPaths{i,1})
-        
-        if actinConditions.maskLoc(i) == 1
-            try
-                % TN2022: if only External_ROI folder is provided
-                masks = dir([qfsmPackPaths{i,1} fs char(extlroi(isfolder(extlroi)))]);
-            catch ME
-                switch ME.identifier
-                    case 'MATLAB:catenate:dimensionMismatch'
-                        % TN2023: Windows OS is not case-sensitive and will
-                        % likely give multiple possible equivalent folder names.
-                        tmpFolder = extlroi(isfolder(extlroi));
-                        masks = dir([qfsmPackPaths{i,1} fs char(tmpFolder(1))]);
-                    otherwise
-                        % TN2019: these 2 folders contain essentially the same mask
-                        % because to use the hand-drawn external mask, we have to pass
-                        % that through SegmentationPackage.
-                        masks = dir([qfsmPackPaths{i,1} fs 'SegmentationPackage' fs 'refined_masks' fs 'refined_masks_for_channel_1']);
-                end
-            end
-        elseif actinConditions.maskLoc(i) == 2
-            
-            masks = dir([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'refined_masks' fs 'refined_masks_for_channel_1']);
-        elseif actinConditions.maskLoc(i) == 3
-            
-            masks = dir([qfsmPackPaths{i,1} fs 'SegmentationPackage' fs 'refined_masks' fs 'refined_masks_for_channel_1']);
-        else
-            
-            disp('error:: Folder of masks does not exist.')
-        end
-        
-    else
-        error('Please input cell mask.') % TN.AD. 20211119
-    end
+    masks = getActinMask(qfsmPackPaths(i,1), actinConditions.maskLoc(i));
     %only retain movieInfo features that exist within mask
     
-    %% Get speckle props
-    %actinPropPerTimeInt{i,1}(1,1).speckleList = find(~isnan(MPM(:,2))); %%%% ISN'T THIS LINE IS USELESS? IF WE NEED TO INITIATE FIELD .SPECKLELIST,
-    %%%% CAN'T WE JUST DO: actinPropPerTimeInt{i,1}(1,1).speckleList = [];
-    
+    %% Get speckle props   
     for j = 1 : fsmFrames(i,1)
         
         %% get ILmax & IBkg - TN 20210524
-        
-        % load speckle cands structure for intensity of speckle and background
-        if fsmFrames(i,1) < 10
-            load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs 'cands_' num2str(j,'%01.f') '.mat'], 'cands');
-        elseif fsmFrames(i,1) < 100
-            load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs 'cands_' num2str(j,'%02.f') '.mat'], 'cands');
-        elseif fsmFrames(i,1) < 1000
-            % if actin movie is >100 frames then the first cands will be named ..001.mat and so on.
-            load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs 'cands_' num2str(j,'%03.f') '.mat'], 'cands');
-        else
-            error('Loading cands is not accounting for >999 fsm frames');
+        % Load speckle cands structure for intensity of speckle and background
+        try
+            if fsmFrames(i,1) < 10
+                load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs 'cands_' num2str(j,'%01.f') '.mat'], 'cands');
+            elseif fsmFrames(i,1) < 100
+                load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs 'cands_' num2str(j,'%02.f') '.mat'], 'cands');
+            elseif fsmFrames(i,1) < 1000
+                % if actin movie is >100 frames then the first cands will be named ..001.mat and so on.
+                load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs 'cands_' num2str(j,'%03.f') '.mat'], 'cands');
+            else
+                error('Loading cands is not accounting for >999 fsm frames');
+            end
+        catch
+            warning('Folder of QFSM results for speckle candidates is not structured as expected.')
+            warning('Automatic debugging. Contact developers for details.')
+            if fsmFrames(i,1) < 10
+                load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs subfolderName fs 'cands_' num2str(j,'%01.f') '.mat'], 'cands');
+            elseif fsmFrames(i,1) < 100
+                load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs subfolderName fs 'cands_' num2str(j,'%02.f') '.mat'], 'cands');
+            elseif fsmFrames(i,1) < 1000
+                % if actin movie is >100 frames then the first cands will be named ..001.mat and so on.
+                load([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'speckles' fs subfolderName fs 'cands_' num2str(j,'%03.f') '.mat'], 'cands');
+            else
+                error('Loading cands is not accounting for >999 fsm frames');
+            end
         end
         
         lmaxAll = vertcat(cands.Lmax);
-                
+        
         %% get .kinScorePos, .kinScore, .specklePosInit, .speckleVelocity, and
         %% .speckleSpeed
         
@@ -243,66 +230,30 @@ for i = 1 : numMovs
             [MPM(actinPropPerTimeInt{i,1}(j,1).speckleList,2*j), ...
             MPM(actinPropPerTimeInt{i,1}(j,1).speckleList,2*j - 1)];
         
-        if actinConditions.maskLoc(i) ~= 0
-            
-            if actinConditions.maskLoc(i) == 1
-                
-                              
-                try
-                    % these 2 folders (External_ROI and refined_masks from Segmentation Package contain essentially the same mask
-                    
-                    [actinPropPerTimeInt{i,1}(j).indxMask(:,2), ...
-                        actinPropPerTimeInt{i,1}(j).indxMask(:,1)] = ...
-                        find(imread([qfsmPackPaths{i,1} fs 'SegmentationPackage' fs 'refined_masks' ...
-                        fs 'refined_masks_for_channel_1' fs masks(j + 2).name]));
-                catch % if only External_ROI was provided
-                    %extract (y,x) coordinates for all pixels within external mask
-                    try
-                        [actinPropPerTimeInt{i,1}(j).indxMask(:,2), ...
-                            actinPropPerTimeInt{i,1}(j).indxMask(:,1)] = ...
-                            find(imread([qfsmPackPaths{i,1} fs char(extlroi(isfolder(extlroi))) fs ...
-                            masks(j + 2).name]));
-                    catch ME
-                        switch ME.identifier
-                            case 'MATLAB:catenate:dimensionMismatch'
-                                tmpFolder = extlroi(isfolder(extlroi));
-                                [actinPropPerTimeInt{i,1}(j).indxMask(:,2), ...
-                                    actinPropPerTimeInt{i,1}(j).indxMask(:,1)] = ...
-                                    find(imread([qfsmPackPaths{i,1} fs char(tmpFolder(1)) fs ...
-                                    masks(j + 2).name]));
-                        end
-                    end
-                end
-                
-            elseif actinConditions.maskLoc(i) == 2
-                
-                %extract (y,x) coordinates for all pixels within refined mask
+        switch actinConditions.maskLoc(i) % ~= 0
+            case {1,2} %extract (y,x) coordinates for all pixels within refined mask
                 [actinPropPerTimeInt{i,1}(j).indxMask(:,2), ...
                     actinPropPerTimeInt{i,1}(j).indxMask(:,1)] = ...
-                    find(imread([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'refined_masks' ...
-                    fs 'refined_masks_for_channel_1' fs masks(j + 2).name]));
-                
-            elseif actinConditions.maskLoc(i) == 3
-                
+                    find(imread([masks{1}(j+2).folder fs masks{1}(j + 2).name]));
+            case 3
                 [actinPropPerTimeInt{i,1}(j).indxMask(:,2), ...
                     actinPropPerTimeInt{i,1}(j).indxMask(:,1)] = ...
                     find(imread([qfsmPackPaths{i,1} fs 'SegmentationPackage' fs 'refined_masks' ...
-                    fs 'refined_masks_for_channel_1' fs masks(j + 2).name]));
-            end
-            
-            %indices of positions
-            pos = [actinPropPerTimeInt{i,1}(j).speckleInitPos(:,2) ...
-                actinPropPerTimeInt{i,1}(j).speckleInitPos(:,1)];
-            
-            actinPropPerTimeInt{i,1}(j).speckleMaskDensity = ...
-                sum(ismember(round(pos),[actinPropPerTimeInt{i,1}(j).indxMask(:,2), ...
-                actinPropPerTimeInt{i,1}(j).indxMask(:,1)],'rows')) / ...
-                length(actinPropPerTimeInt{i,1}(j).indxMask(:,1));
+                    fs 'refined_masks_for_channel_1' fs masks{1}(j + 2).name]));
+            otherwise
+                error('Unexpected actinConditions.maskLoc')
         end
+        %indices of positions
+        pos = [actinPropPerTimeInt{i,1}(j).speckleInitPos(:,2) ...
+            actinPropPerTimeInt{i,1}(j).speckleInitPos(:,1)];
+        
+        actinPropPerTimeInt{i,1}(j).speckleMaskDensity = ...
+            sum(ismember(round(pos),[actinPropPerTimeInt{i,1}(j).indxMask(:,2), ...
+            actinPropPerTimeInt{i,1}(j).indxMask(:,1)],'rows')) / ...
+            length(actinPropPerTimeInt{i,1}(j).indxMask(:,1));
         
         %vector of directories
-        temp(j) = ...
-            load(strcat([qfsmPackPaths{i,1} fs 'QFSMPackage' fs 'kineticAnalysis' fs maps{i}(j).name]));
+        temp(j) = load([maps{i}(j).folder fs maps{i}(j).name]);
         
         %assigning kinetic scores and their positions
         actinPropPerTimeInt{i,1}(j,1).kinScore = temp(j).kinScore(:,4);
@@ -313,7 +264,7 @@ for i = 1 : numMovs
         %assigning intensity of speckle and background
         ILmaxMat = nan(size(actinPropPerTimeInt{i,1}(j,1).speckleList,1),1);
         IBkgMat = nan(size(actinPropPerTimeInt{i,1}(j,1).speckleList,1),1);
-            
+        
         for iSpkl = 1:size(actinPropPerTimeInt{i,1}(j,1).speckleList,1) % loop through each speckle detected in each FSM frame
             
             xPos = actinPropPerTimeInt{i,1}(j,1).speckleInitPos(iSpkl,2);
@@ -372,11 +323,11 @@ for i = 1 : numMovs
             actinPropPerTimeInt{i}(j).speckleDensity(iCol,1) = ...
                 length(matchindx) / neighbhArea;
             
-           matchedVect = actinPropPerTimeInt{i,1}(j,1).speckleVelocity(matchindx,:);
-           matchedSpeed = actinPropPerTimeInt{i,1}(j,1).speckleSpeed(matchindx,:);
+            matchedVect = actinPropPerTimeInt{i,1}(j,1).speckleVelocity(matchindx,:);
+            matchedSpeed = actinPropPerTimeInt{i,1}(j,1).speckleSpeed(matchindx,:);
             
             %TN 20210808: add ILmaxNeighb & IBkgNeighb (to mirror
-            %ilmaxCorrected and ibkgCorrected when 
+            %ilmaxCorrected and ibkgCorrected when
             %    If no matched neighbor, ilmaxNeighb = ilmax;
             %    If there is a matched neighbor, ilmaxNeighb = (average ilmax)
             matchedILmax = actinPropPerTimeInt{i,1}(j,1).ILmax(matchindx,:);
@@ -387,13 +338,13 @@ for i = 1 : numMovs
             actinPropPerTimeInt{i}(j).IBkgNeighb(iCol,1) = ...
                 mean(matchedIBkg);
             
-                        
+            
             %KJ 20210712: if only one speckle neighbor exists, or only one
             %speckle neighbor has a velocity > 0, movement coherence is not
             %relevant
             if size(matchindx,1) == 1 || length(find(matchedSpeed > 0)) <= 1
                 actinPropPerTimeInt{i}(j).speckleMvmtCohere(iCol,1) = NaN;
-            else    
+            else
                 
                 % To calculate speckleMvmtCohere, take the resultant vector
                 % magnitude, divide that by the average of speed of each
@@ -413,5 +364,4 @@ for i = 1 : numMovs
 end %(for i = 1 : numMovs)
 
 end
-
 %% ~~~ the end ~~~

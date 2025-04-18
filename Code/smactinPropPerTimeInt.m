@@ -1,8 +1,8 @@
-function [combinePropPerTimeInt] = smactinPropPerTimeInt(smPropPerTimeInt,...
+function combinePropPerTimeInt = smactinPropPerTimeInt(smPropPerTimeInt,...
     actinPropPerTimeInt,combineConditions,threshMet,smactinFlag)
-%SMACTINPROPPERTIMEINT : put together single molecule tracklets and associated local actin speckle properties
+%SMACTINPROPPERTIMEINT : put together single molecule tracklets and associated local actin speckle properties in SM-centric strategy
 %
-%SYNOPSIS: [combinePropPerTimeInt] = smactinPropPerTimeInt(smPropPerTimeInt,...
+%SYNOPSIS: combinePropPerTimeInt = smactinPropPerTimeInt(smPropPerTimeInt,...
 %    actinPropPerTimeInt,combineConditions,threshMet,smactinFlag)
 %
 %INPUT: smPropPerTimeInt  : (n x 1 cell array of structures) SMI arm
@@ -32,12 +32,20 @@ function [combinePropPerTimeInt] = smactinPropPerTimeInt(smPropPerTimeInt,...
 %                       .firstFsmFrame : the first frame of speckles that should be
 %                                        considered for matching to the start of SM movie.
 %                                       Example: .firstFsmFrame = 2 (for
-%                                       darkframe-scheme dataset)
+%                                       darkframe-scheme dataset where the
+%                                       first FSM interval would only
+%                                       contain spurious meaningless SM
+%                                       detection)
+%
+%                       .matchFsmIntShift: (array) the number of FSM interval
+%                                       missing from SM input. (this is
+%                                       different from empty SM interval)
 %
 %               threshMet : vector of cell vectors containing SM indices
 %                           that survived a minimum lifetime (observations)
 %                           threshold and exist within a mask obtained from
-%                           qFSM.
+%                           qFSM. If input is [], then all SM is considered
+%                           inside the mask.
 %
 %             smactinFlag : (structure) flags describing the method by
 %                           which SM tracklets and actin speckles are
@@ -62,60 +70,81 @@ function [combinePropPerTimeInt] = smactinPropPerTimeInt(smPropPerTimeInt,...
 %
 % 1. Single-Molecules
 %               smList: List of particles that exist in the window of time
-%                       for time-averaging                          (c3,c6,c7,c8,c9)
-%           .smMeanPos: Mean position (x/y-coordinates) per particle in
-%                       the window for time-averaging               (c3,c6,c7,c8,c9)
+%                       for time-averaging                
+%
+%           .smMeanPos: Mean position (x/y-coordinates) per particle in the
+%                       window for time-averaging              
+%
 %          .smMeanDisp: mean frame-to-frame displacement for all SM
 %                       thresholding survivors in the window of
-%                       time-averaging (units: pixels)              (c3,c6,c7,c8,c9)
-%         .smNetVelocity: SM velocity vector  per frame averaged
-%                       across a particular interval                (c3,c6,c7,c8,c9)
-%          .smNetSpeed: net speed for all SM thresholding survivors
-%                       within a particular interval.
-%                       (units: pixels/SMframe)                     (c3,c6,c7,c8,c9)
+%                       time-averaging (pixels)              
+%
+%         .smNetVelocity: SM velocity vector  per frame averaged across a
+%                       particular interval               
+%
+%          .smNetSpeed: net speed for all SM thresholding survivors within 
+%                       a particular interval. (pixels/SM frame)                    
+%
 %           .smMeanAmp: mean intensity of a SM track during a particular
-%                       window of time                              (c3,c6,c7,c8,c9)
+%                       window of time                             
+%
 %          .trackClass: classification of all tracks based on moment scaling
 %                       spectrum analysis
 %                       = 0 : immobile
 %                       = 1 : confined brownian
 %                       = 2 : pure brownian (free diffusion)
-%                       = 3 : directed motion                       (c3,c6,c7,c8,c9)
+%                       = 3 : directed motion                      
+%
 %            .diffCoef: diffusion coefficient with row number corresponding
-%                       to particle index                           (c3,c6,c7,c8,c9)
-%             .confRad: confinement radius of immobile, confined particle with row
-%                       number corresponding to particle index      (c3,c6,c7,c8,c9)
+%                       to particle index                          
+%
+%             .confRad: max pairwise distance of localizations,
+%                       with row number corresponding to particle index      
+%
 %   .smComovementAngle: angle of comovement between the receptor and it nn
-%                       speckle or sm                               (c3,c7,c8,c9)
+%                       speckle or SM                              
+%
 %      .smIndiPosPerFr: list of SM position for each SM frame (group of ~51
-%                       frames per interval)                        (c7)
+%                       frames per interval)                      
+%
+%            .mssSlope: SM mss slope (added TN Dec2022/Jan2023)
+%
+%    .smModeDiffRadius: diffusion radius calculated by Mode Analysis
+%                       (similar to confinement radius of immobile,
+%                       confined particle (TN 20240323))
 %
 % 2. Speckles
 %         .speckleList: List of speckles that exist in the frame
-%                                                                         (c1,c2,c3,c4,c7)
-%          .specklePos: The speckle position for a particular FSM
-%                       frame (units: pixels)                             (c1,c2,c3,c4,c7)
+%                                                                         
+%          .specklePos: The speckle position for a particular FSM frame
+%                       (pixels)                             
 %     .speckleVelocity: The speckle velocity from a frame to the
-%                       following frame (units: pixels / receptor frame)  (c1,c2,c3,c4,c7)
+%                       following frame (pixels / receptor frame)  
+%
 %        .speckleSpeed: speckle speed from a particular FSM frame to the
-%                       following frame (units: pixels / receptor frame)  (c1,c2,c3,c4,c7)
+%                       following frame (pixels / receptor frame)  
+%
 %     .spklMtchPerSmFr: list of speckles matched per sm frame (group of ~51
-%                       frames per interval)                              (c7)
+%                       frames per interval)                             
 %
 % 3. Kinetic Scores
 %         .kinScorePos: The positions at which we have kinetic scores
-%                       (units: pixels)                             (c2,c4,c5,c6,c8)
-%            .kinScore: The kinetic score from the qFSM package     (c2,c4,c5,c6,c8)
+%                       (units: pixels)                             
+%
+%            .kinScore: The kinetic score from the qFSM package     
 %
 % 4. Miscellaneous
 %         .maskDensity: The number of speckles within a mask divided
-%                       by the number of pixels comprising the mask    (all columns)
+%                       by the number of pixels comprising the mask    
+%
 %          .dist_match: Distance of a particular nn or collection of nns
-%                       depending on which structure                   (all columns)
+%                       depending on which structure                   
+%
 %                 .num: Number of neighbors contained within a specified
-%                       disc                                           (all columns)
+%                       disc                                           
+%
 %           .rad_match: Matching radius to form disc and obtain neighbors
-%                       for each speckle, kinetic score, or sm         (all columns)
+%                       for each speckle, kinetic score, or sm         
 %
 %GLOSSARY:  SM  : single molecule
 %           SMI : sinlge molecule imaging
@@ -131,7 +160,7 @@ function [combinePropPerTimeInt] = smactinPropPerTimeInt(smPropPerTimeInt,...
 %the mask is retained. When this change is made there, then this function
 %must be changed so that it no longer needs/uses threshMet.
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 
@@ -153,13 +182,15 @@ function [combinePropPerTimeInt] = smactinPropPerTimeInt(smPropPerTimeInt,...
 
 
 %% Const & variable initiation
-
 numMovs = length(actinPropPerTimeInt);
 fsmFrames = nan(numMovs,1);
 smIntervals = nan(numMovs,1);
+if ~isfield(combineConditions, 'matchFsmIntShift')
+    combineConditions.matchFsmIntShift = zeros(numMovs,1);
+end
+
 
 %% Output
-
 combinePropPerTimeInt = cell(numMovs,1);
 
 %% Calculation & matching:
@@ -171,10 +202,20 @@ for iMov = 1 : numMovs % loop through each movie
         continue
     end
     
+    
+    %% Add empty rows to SM property input structure to match the FSM interval 1-to-1
+    fieldNames = fieldnames(smPropPerTimeInt{iMov,1})';
+    tmp = [fieldNames; cell(1, length(fieldNames))];
+    additionalRows = repmat(struct(tmp{:}),combineConditions.matchFsmIntShift(iMov),1);
+    try
+        smPropPerTimeIntCurr = vertcat(additionalRows, smPropPerTimeInt{iMov});
+    catch % Try transposing the structure. I am not sure why the size is [1 10] vs [10 1]
+        smPropPerTimeIntCurr = vertcat(additionalRows, smPropPerTimeInt{iMov}.');
+    end
     % intervals of frames per movie
     fsmFrames(iMov) = length(actinPropPerTimeInt{iMov});
-    smIntervals(iMov) = length(smPropPerTimeInt{iMov});
-    
+    smIntervals(iMov) = length(smPropPerTimeIntCurr);
+
     %% single molecule property assignment (+ speckle density within mask):
     
     %initialization
@@ -188,63 +229,70 @@ for iMov = 1 : numMovs % loop through each movie
     for k = combineConditions.firstFsmFrame(iMov) : smIntervals(iMov)
         
         % density of speckles within mask
-        combinePropPerTimeInt{iMov}{1}(k).speckleMaskDensity = ...
-            actinPropPerTimeInt{iMov}(k).speckleMaskDensity;
+        combinePropPerTimeInt{iMov}{1}(k).speckleMaskDensity = actinPropPerTimeInt{iMov}(k).speckleMaskDensity;
         
         %single-molecule properties
+        if isempty(threshMet) % if SM w/in mask is handled in previous step, take all listed SM
+            combinePropPerTimeInt{iMov}{1}(k).smList = [1:length(smPropPerTimeIntCurr(k).smList)]';
+        else % for backward compartibility
+            combinePropPerTimeInt{iMov}{1}(k).smList = threshMet{iMov}{k};
+        end
+        tmp = combinePropPerTimeInt{iMov}{1}(k).smList;
         
-        combinePropPerTimeInt{iMov}{1}(k).smList = ...
-            threshMet{iMov}{k};
-        combinePropPerTimeInt{iMov}{1}(k).smMeanPos = ...
-            smPropPerTimeInt{iMov}(k).meanPos(threshMet{iMov}{k},:);
-        combinePropPerTimeInt{iMov}{1}(k).smNetSpeed = ...
-            smPropPerTimeInt{iMov}(k).netSpeed(threshMet{iMov}{k},:);
-        combinePropPerTimeInt{iMov}{1}(k).smMeanAmp = ...
-            smPropPerTimeInt{iMov}(k).meanAmp(threshMet{iMov}{k});
-        combinePropPerTimeInt{iMov}{1}(k).smLifetime = ...
-            smPropPerTimeInt{iMov}(k).lifetime(threshMet{iMov}{k});
-        combinePropPerTimeInt{iMov}{1}(k).diffCoef = ...
-            smPropPerTimeInt{iMov}(k).diffCoef(threshMet{iMov}{k});
+        combinePropPerTimeInt{iMov}{1}(k).smMeanPos     = smPropPerTimeIntCurr(k).meanPos(tmp,:);
+        combinePropPerTimeInt{iMov}{1}(k).smNetSpeed    = smPropPerTimeIntCurr(k).netSpeed(tmp,:);
+        combinePropPerTimeInt{iMov}{1}(k).smMeanAmp     = smPropPerTimeIntCurr(k).meanAmp(tmp);
+        combinePropPerTimeInt{iMov}{1}(k).smLifetime    = smPropPerTimeIntCurr(k).lifetime(tmp);
+        combinePropPerTimeInt{iMov}{1}(k).diffCoef      = smPropPerTimeIntCurr(k).diffCoef(tmp);
+        combinePropPerTimeInt{iMov}{1}(k).smMeanDisp    = smPropPerTimeIntCurr(k).meanDisp(tmp);
+        combinePropPerTimeInt{iMov}{1}(k).smNetVelocity = smPropPerTimeIntCurr(k).netVelocity(tmp,:);
+        combinePropPerTimeInt{iMov}{1}(k).confRad       = smPropPerTimeIntCurr(k).confRad(tmp);
         
-        if isfield(smPropPerTimeInt{iMov}(k),'diffCoefF2F')
-            combinePropPerTimeInt{iMov}{1}(k).smDiffCoefF2F = ...
-                smPropPerTimeInt{iMov}(k).diffCoefF2F(threshMet{iMov}{k});
-        else % .diffCoefF2F was created for Mode Analysis. If no mode analysis was implemented, make combinePropPerTimeInt.smDiffCoefF2F same as .diffCoef
-            combinePropPerTimeInt{iMov}{1}(k).smDiffCoefF2F = ...
-                combinePropPerTimeInt{iMov}{1}(k).diffCoef;
+        combinePropPerTimeInt{iMov}{1}(k).trackClass    = smPropPerTimeIntCurr(k).trackClass(tmp);
+        if isfield(smPropPerTimeIntCurr(k),'mssSlope') % check if .mssSlope is a field b/c it's only added later on
+            combinePropPerTimeInt{iMov}{1}(k).mssSlope = smPropPerTimeIntCurr(k).mssSlope(tmp);
         end
         
-        combinePropPerTimeInt{iMov}{1}(k).smDensity = ...
-            smPropPerTimeInt{iMov}(k).smDensity(threshMet{iMov}{k});
-        combinePropPerTimeInt{iMov}{1}(k).smIndiPosPerFr = ...
-            smPropPerTimeInt{iMov}(k).indiPosPerFr(threshMet{iMov}{k});
+        if isfield(smPropPerTimeIntCurr(k),'aggregState') % check if .aggregState is a field b/c it's only added later on
+            combinePropPerTimeInt{iMov}{1}(k).smAggregState = smPropPerTimeIntCurr(k).aggregState(tmp);
+        end
         
-        if isfield(smPropPerTimeInt{iMov}(k),'diffRad')
-            combinePropPerTimeInt{iMov}{1}(k).smDiffRad = ...
-                smPropPerTimeInt{iMov}(k).diffRad(threshMet{iMov}{k});
+        % FRAME-TO-FRAME ANALYSIS:
+        if isfield(smPropPerTimeIntCurr(k),'meanSmDensity')
+            % new field for smDensity per frame was added after Jan 2023,
+            % causing the field name change of .smDensity to .meanSmDensity
+            combinePropPerTimeInt{iMov}{1}(k).smDensity = smPropPerTimeIntCurr(k).meanSmDensity(tmp);
+            combinePropPerTimeInt{iMov}{1}(k).smDensityPerFr = smPropPerTimeIntCurr(k).smDensityPerFr(tmp);
         else
-            combinePropPerTimeInt{iMov}{1}(k).smDiffRad = ...
-                smPropPerTimeInt{iMov}(k).confRad(threshMet{iMov}{k}); % make diffRad similar to confRad
+            combinePropPerTimeInt{iMov}{1}(k).smDensity = smPropPerTimeIntCurr(k).smDensity(tmp);
         end
+        combinePropPerTimeInt{iMov}{1}(k).smIndiPosPerFr = smPropPerTimeIntCurr(k).indiPosPerFr(tmp);
         
-        if isfield(smPropPerTimeInt{iMov}(k),'diffMode')
-            combinePropPerTimeInt{iMov}{1}(k).smDiffMode = ...
-                smPropPerTimeInt{iMov}(k).diffMode(threshMet{iMov}{k});
+        % CHECK FOR MODE ANALYSIS: - TN20240324
+        % If no mode analysis was implemented, make these fields NaN.
+        modeFlag = isfield(smPropPerTimeIntCurr(k),'mDiffMode') && ...
+           isfield(smPropPerTimeIntCurr(k),'mDiffRadius') && ...
+           isfield(smPropPerTimeIntCurr(k),'mMsdF2F') && ...
+           isfield(smPropPerTimeIntCurr(k),'mMeanPosStd') && ...
+           isfield(smPropPerTimeIntCurr(k),'mLifetime') && ...
+           isfield(smPropPerTimeIntCurr(k),'mDiffMode');
+       
+        if modeFlag
+            combinePropPerTimeInt{iMov}{1}(k).smMode = smPropPerTimeIntCurr(k).mDiffMode(tmp); % Diffusion Mode classification (1 or 2)
+            combinePropPerTimeInt{iMov}{1}(k).smModeDiffCoef = smPropPerTimeIntCurr(k).mDiffCoef(tmp); % Diffusion coefficient from mean square F2F displacement. (previously .smDiffCoefF2F)
+            combinePropPerTimeInt{iMov}{1}(k).smDiffRadius   = smPropPerTimeIntCurr(k).mDiffRadius(tmp); % Diffusion radius (previously .smDiffRad)
+            combinePropPerTimeInt{iMov}{1}(k).smModeMsdF2f   = smPropPerTimeIntCurr(k).mMsdF2F(tmp);   % Mean square F2F displacement
+            combinePropPerTimeInt{iMov}{1}(k).smMeanPosStd   = smPropPerTimeIntCurr(k).mMeanPosStd(tmp); % Mean positional standard deviation
+            combinePropPerTimeInt{iMov}{1}(k).smLifetime     = smPropPerTimeIntCurr(k).mLifetime(tmp); % Track lifetime
+        else 
+            combinePropPerTimeInt{iMov}{1}(k).smMode = NaN;
+            combinePropPerTimeInt{iMov}{1}(k).smModeDiffCoef = NaN;
+            combinePropPerTimeInt{iMov}{1}(k).smDiffRadius = NaN;
+            combinePropPerTimeInt{iMov}{1}(k).smModeMsdF2f = NaN;
+            combinePropPerTimeInt{iMov}{1}(k).smMeanPosStd = NaN;
+            combinePropPerTimeInt{iMov}{1}(k).smLifetime = NaN;
+            
         end
-        
-        if isfield(smPropPerTimeInt{iMov}(k),'aggregState') % check if .aggregState is a field for backward compartibility b/c it's only added later on
-            combinePropPerTimeInt{iMov}{1}(k).smAggregState = ...
-                smPropPerTimeInt{iMov}(k).aggregState(threshMet{iMov}{k});
-        end
-        
-        combinePropPerTimeInt{iMov}{1}(k).smMeanDisp = ...
-            smPropPerTimeInt{iMov}(k).meanDisp(threshMet{iMov}{k});
-        combinePropPerTimeInt{iMov}{1}(k).smNetVelocity = ...
-            smPropPerTimeInt{iMov}(k).netVelocity(threshMet{iMov}{k},:);
-        combinePropPerTimeInt{iMov}{1}(k).confRad = ...
-            smPropPerTimeInt{iMov}(k).confRad(threshMet{iMov}{k});
-        combinePropPerTimeInt{iMov}{1}(k).trackClass = ...
-            smPropPerTimeInt{iMov}(k).trackClass(threshMet{iMov}{k});
         
     end %(for k = combineConditions.firstFsmFrame(iMov) : smIntervals(iMov))
     
@@ -254,7 +302,7 @@ for iMov = 1 : numMovs % loop through each movie
     
     for k = combineConditions.firstFsmFrame(iMov): smIntervals(iMov) % looping over time windows
         
-        smMatchPt = smPropPerTimeInt{iMov}(k).meanPos(threshMet{iMov}{k},:);
+        smMatchPt = smPropPerTimeIntCurr(k).meanPos(combinePropPerTimeInt{iMov}{1}(k).smList,:);
         actinMatchPt = actinPropPerTimeInt{iMov}(k).speckleInitPos;
         
         % if no speckle or no sm in this time window, then no analysis and go to the next time window.

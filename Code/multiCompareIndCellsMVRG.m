@@ -11,7 +11,7 @@ function [inputBatchName, pSigIndCellArr, outlierIndxArr, sigRes, mvrgCoefStruct
 %               i.e.: smLabelBase = { 'SM Mean Amplitude','SM Diff Coef',
 %               'SM Local Density','smDiffusionRadius', 'SM Aggreg State'};
 %
-%           displSpacing : allow user to input spacing parameters for final  
+%           displSpacing : (2x1 matrix) allow user to input spacing parameters for final  
 %                          output notBoxPlot figure [spaceBtwEachBoxPlot, spaceBtwEachGroup]. 
 %
 %           vargarin     : Each input is a cell array of individual cells
@@ -26,7 +26,7 @@ function [inputBatchName, pSigIndCellArr, outlierIndxArr, sigRes, mvrgCoefStruct
 % [inputBatchName, pSigIndCellArr, outlierIndxArr, sigRes] = multiCompareIndCellsMVRG(spekLabelBase, smLabelBase, displSpacing, ...
 %     strInl_1.testResultSplitAbv, strInl_2.testResultSplitAbv, strInl_3.testResultSplitAbv, strInl_4.testResultSplitAbv);
 %
-% Example for 2 (run ttest2) -- 3rd input MUST be true.
+% Example for 2 (run ttest2) -- 4th input MUST be true.
 %[inputBatchName, pSigIndCellArr, outlierIndxArr, sigRes] = multiCompareIndCellsMVRG(spekLabelBase, smLabelBase, displSpacing, ...
 %    true, strInl_1.testResultSplitAbv, strInl_2.testResultSplitAbv);
 %
@@ -71,7 +71,7 @@ function [inputBatchName, pSigIndCellArr, outlierIndxArr, sigRes, mvrgCoefStruct
 %
 % Tra Ngo, April 2021
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 
@@ -98,6 +98,10 @@ end
 
 if isempty(displSpacing)
     displSpacing = [0.4 5];
+elseif ~ismatrix(displSpacing) || size(displSpacing, 2) || 2 && size(displSpacing, 1) ~= 1 || ~isnumeric(displSpacing(1,1)) || ~isnumeric(displSpacing(1,2)) 
+    error(['Function expects the 3rd input to be matrix of spacing for display. \n' ...
+        'If user wants to use default display, use the following syntax: \n' ...
+        'multiCompareIndCellsMVRG(spekLabelBase, smLabelBase, [], dataset_1, dataset_2, ...)'], '') % note the '' is required to format \newline in error message
 end
 
 numBatch = nargin - 3; % number of testResult input

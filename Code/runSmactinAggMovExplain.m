@@ -32,7 +32,15 @@ function outputStruct = runSmactinAggMovExplain(tassm,matchindx,smactinFlag, pro
 %                               4: SM density
 %                               5: SM spatial span
 %                               6: SM apparent assembly state (oligomerization state)
-%                               7: SM diffusion type
+%                               7: SM mss Slope (added TN Jan2023)
+%                               8 - 13: from Mode analysis, added TN Mar2024
+%                               8: SM Diffusion coefficient from mean square F2F displacement 
+%                               9: SM Diffusion radius
+%                               10: SM Mean square F2F displacement 
+%                               11: SM Mean positional standard deviation
+%                               12: SM lifetime
+%                               13: SM Mode (1, 2, ...) <- VERY IMPORTANT CONSTANT
+%                               14: SM diffusion type (motion classification by MSS)
 %                       See smactinMat.m for details.
 %
 %        matchindx      : indices of speckles,ks, or sms matching to an object;
@@ -158,7 +166,7 @@ function outputStruct = runSmactinAggMovExplain(tassm,matchindx,smactinFlag, pro
 %
 %Tra Ngo, Aug 2021
 %
-% Copyright (C) 2022, Jaqaman Lab - UTSouthwestern 
+% Copyright (C) 2025, Jaqaman Lab - UTSouthwestern 
 %
 % This file is part of SMI-FSM.
 % 
@@ -190,6 +198,7 @@ inputParam = cell(len,1);
 
 %% Run MVRG analysis for each cell ROI/movie
 for i = 1:len
+    disp(['Mov: ' num2str(i)])
     [testResult{i,1},trajClass{i,1}, testResultSplit{i,1}, inputParam{i,1}] = ...
         smactinAggMov(tassm(i),matchindx(i),smactinFlag, ...
         propSpk, propSm, maxNumPropVect, mvrgAggMatFlag, cutOffInput, outlierParam); 
