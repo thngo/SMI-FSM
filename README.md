@@ -8,4 +8,4 @@ SMI-FSM is a software (written in MATLAB) for the analysis of simultaneous two-c
 
 2. Integrate and quantitatively analyze the relationships between the single molecule and actin speckle properties.
 
-Please download the example data from: https://cloud.biohpc.swmed.edu/index.php/s/FFyP8yLDtsNe9ed
+Please download the example data from: https://cloud.biohpc.swmed.edu/index.php/s/dSLYMEwXafEFCXq
